@@ -1,0 +1,117 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <curl/curl.h>
+
+#define API_KEY "YOUR_API_KEY"
+
+// Structure to store API response
+struct Memory {
+    char *data;
+    size_t size;
+};
+
+// Callback function to collect data
+size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t total_size = size * nmemb;
+    struct Memory *mem = (struct Memory *)userp;
+
+    char *ptr = realloc(mem->data, mem->size + total_size + 1);
+    if(ptr == NULL) return 0;
+
+    mem->data = ptr;
+    memcpy(&(mem->data[mem->size]), contents, total_size);
+    mem->size += total_size;
+    mem->data[mem->size] = '\0';
+
+    return total_size;
+}
+
+// Function to extract and print Date + Temperature
+void extract_weather(char *json) {
+    char *date_ptr = json;
+    char *temp_ptr;
+
+    printf("\nDate\t\tTemperature (°C)\n");
+    printf("---------------------------------\n");
+
+    while ((date_ptr = strstr(date_ptr, "\"datetime\":\"")) != NULL) {
+        date_ptr += strlen("\"datetime\":\"");
+
+        char date[20];
+        strncpy(date, date_ptr, 10);
+        date[10] = '\0';
+
+        temp_ptr = strstr(date_ptr, "\"temp\":");
+        if (temp_ptr != NULL) {
+            temp_ptr += strlen("\"temp\":");
+
+            float temp;
+            sscanf(temp_ptr, "%f", &temp);
+
+            printf("%s\t%.2f\n", date, temp);
+        }
+
+        date_ptr++;
+    }
+}
+
+int main() {
+    CURL *curl;
+    CURLcode res;
+
+    struct Memory chunk;
+    chunk.data = malloc(1);
+    chunk.size = 0;
+
+    char location[50];
+    char start_date[20];
+    char end_date[20];
+
+    printf("Enter City: ");
+    scanf("%s", location);
+
+    printf("Enter Start Date (YYYY-MM-DD): ");
+    scanf("%s", start_date);
+
+    printf("Enter End Date (YYYY-MM-DD): ");
+    scanf("%s", end_date);
+
+    char url[500];
+    sprintf(url,
+        "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/%s/%s/%s?unitGroup=metric&key=%s&contentType=json",
+        location, start_date, end_date, API_KEY
+    );
+
+    curl = curl_easy_init();
+
+    if(curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+
+        res = curl_easy_perform(curl);
+
+        if(res != CURLE_OK) {
+            printf("Request failed: %s\n", curl_easy_strerror(res));
+        } else {
+            printf("\nRaw Data Fetched Successfully!\n");
+
+            // Save to file
+            FILE *fp = fopen("weather_data.json", "w");
+            if(fp != NULL) {
+                fprintf(fp, "%s", chunk.data);
+                fclose(fp);
+                printf("Data saved to weather_data.json\n");
+            }
+
+            // Extract useful info
+            extract_weather(chunk.data);
+        }
+
+        curl_easy_cleanup(curl);
+    }
+
+    free(chunk.data);
+    return 0;
+}
